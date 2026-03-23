@@ -1,86 +1,94 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
+import os
+import telebot
 
-readers = []
-listeners = []
-excused = []
-done = []
+TOKEN = os.getenv("BOT_TOKEN")
+bot = telebot.TeleBot(TOKEN)
 
-def format_list(lst, checked=False):
-    text = ""
-    for i, name in enumerate(lst, 1):
-        mark = "✅ " if name in done else ""
-        text += f"{i}- {mark}{name}\n"
-    return text if text else "لا يوجد"
+roles = []
+is_collecting = False
 
-def get_text():
-    text = "🌙 المسجلات للقراءة:\n\n"
-    text += format_list(readers)
 
-    text += "\n🎧 المستمعات:\n"
-    text += "\n".join(listeners) if listeners else "لا يوجد"
+# دالة تتحقق إذا المستخدم مشرف في نفس الجروب
+def is_admin(chat_id, user_id):
+    try:
+        admins = bot.get_chat_administrators(chat_id)
+        for admin in admins:
+            if admin.user.id == user_id:
+                return True
+        return False
+    except:
+        return False
 
-    text += "\n\n🌸 المعتذرات:\n"
-    text += "\n".join(excused) if excused else "لا يوجد"
 
-    return text
+# /start
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.reply_to(message, "أهلاً 👋\nالبوت شغال")
 
-def get_buttons():
-    keyboard = [
-        [InlineKeyboardButton("✏️ سجل اسمي", callback_data="register")],
-        [InlineKeyboardButton("❌ احذف اسمي", callback_data="remove")],
-        [
-            InlineKeyboardButton("🎧 مستمعة", callback_data="listener"),
-            InlineKeyboardButton("🌸 معتذرة", callback_data="excuse"),
-        ],
-        [InlineKeyboardButton("✅ قرأت", callback_data="done")]
-    ]
-    return InlineKeyboardMarkup(keyboard)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(get_text(), reply_markup=get_buttons())
+# بدء تسجيل الأدوار
+@bot.message_handler(commands=['start_roles'])
+def start_roles(message):
+    global is_collecting
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    name = query.from_user.first_name
+    if not is_admin(message.chat.id, message.from_user.id):
+        return bot.reply_to(message, "❌ هذا الأمر للمشرفين فقط")
 
-    await query.answer()
+    is_collecting = True
+    bot.reply_to(message, "تم بدء تسجيل الأدوار 🎭")
 
-    if query.data == "register":
-        if name not in readers:
-            readers.append(name)
 
-    elif query.data == "remove":
-        if name in readers:
-            readers.remove(name)
-        if name in listeners:
-            listeners.remove(name)
-        if name in excused:
-            excused.remove(name)
-        if name in done:
-            done.remove(name)
+# إيقاف التسجيل
+@bot.message_handler(commands=['stop_roles'])
+def stop_roles(message):
+    global is_collecting
 
-    elif query.data == "listener":
-        if name not in listeners:
-            listeners.append(name)
-        if name in readers:
-            readers.remove(name)
+    if not is_admin(message.chat.id, message.from_user.id):
+        return bot.reply_to(message, "❌ هذا الأمر للمشرفين فقط")
 
-    elif query.data == "excuse":
-        if name not in excused:
-            excused.append(name)
-        if name in readers:
-            readers.remove(name)
+    is_collecting = False
+    bot.reply_to(message, "تم إيقاف التسجيل ⛔")
 
-    elif query.data == "done":
-        if name in readers and name not in done:
-            done.append(name)
 
-    await query.edit_message_text(get_text(), reply_markup=get_buttons())
+# مسح الأدوار
+@bot.message_handler(commands=['clear_roles'])
+def clear_roles(message):
+    if not is_admin(message.chat.id, message.from_user.id):
+        return bot.reply_to(message, "❌ هذا الأمر للمشرفين فقط")
 
-app = ApplicationBuilder().token("YOUR_TOKEN").build()
+    roles.clear()
+    bot.reply_to(message, "تم مسح الأدوار 🗑️")
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(button))
 
-app.run_polling()
+# عرض الأدوار
+@bot.message_handler(commands=['show_roles'])
+def show_roles(message):
+    if not is_admin(message.chat.id, message.from_user.id):
+        return bot.reply_to(message, "❌ هذا الأمر للمشرفين فقط")
+
+    if not roles:
+        bot.reply_to(message, "لا يوجد أدوار ❌")
+    else:
+        text = "📋 الأدوار:\n" + "\n".join(roles)
+        bot.reply_to(message, text)
+
+
+# تسجيل الأدوار
+@bot.message_handler(func=lambda message: True)
+def collect_roles(message):
+    global is_collecting
+
+    # فقط إذا التسجيل شغال
+    if not is_collecting:
+        return
+
+    # فقط مشرفين
+    if not is_admin(message.chat.id, message.from_user.id):
+        return
+
+    roles.append(message.text)
+    bot.reply_to(message, f"تم حفظ الدور: {message.text}")
+
+
+# تشغيل البوت
+bot.infinity_polling()
